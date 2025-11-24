@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TTS Diagnostics</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="container">
+      <div class="diagnostics">
+        <h2>Speech Diagnostics</h2>
+        <p class="small">Inspect available voices and test the browser TTS.</p>
+
+        <div class="diag-actions">
+          <button id="enableAudio" class="btn">Enable Audio</button>
+          <button id="refreshVoices" class="btn">Refresh Voices</button>
+          <button id="testSpeak" class="btn">Test Speak</button>
+          <button id="back" class="btn secondary">Back</button>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small">Available Voices</div>
+          <div id="voices" class="diag-voices"></div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small">Manual Test</div>
+          <textarea id="manualText" class="edit-area" placeholder="Type text to speak">Hello — this is a voice test.</textarea>
+          <div style="margin-top:8px"><button id="manualSpeak" class="btn">Speak</button></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const voicesEl = document.getElementById('voices');
+      function listVoices(){
+        voicesEl.innerHTML = '';
+        if(!('speechSynthesis' in window)){
+          voicesEl.innerHTML = '<div class="small">TTS not supported in this browser.</div>';
+          return;
+        }
+        const v = window.speechSynthesis.getVoices();
+        if(!v || !v.length) {
+          voicesEl.innerHTML = '<div class="small">No voices found. Try clicking Refresh or interact with the page.</div>';
+          return;
+        }
+        v.forEach(voice=>{
+          const el = document.createElement('div'); el.className='diag-voice';
+          el.textContent = `${voice.name} — ${voice.lang} ${voice.default? '(default)':''} ${voice.localService? 'local':''}`;
+          voicesEl.appendChild(el);
+        });
+      }
+
+      document.getElementById('refreshVoices').addEventListener('click', ()=>{ listVoices(); });
+      document.getElementById('testSpeak').addEventListener('click', ()=>{
+        try{
+          const text = 'This is a test of the speaking functionality. If you hear this, TTS works.';
+          const u = new SpeechSynthesisUtterance(text);
+          const v = window.speechSynthesis.getVoices();
+          console.debug('testSpeak using voices:', v && v.length);
+          if(v && v.length) u.voice = v.find(x=>x.lang.startsWith('en')) || v[0];
+          u.onend = ()=>{ console.debug('testSpeak ended'); };
+          u.onerror = (e)=>{ console.warn('testSpeak error', e); alert('TTS error. Check console for details.'); };
+          window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+        }catch(e){ console.warn('testSpeak failed', e); alert('Test speak failed: '+e); }
+      });
+
+      document.getElementById('enableAudio').addEventListener('click', ()=>{
+        try{
+          // user gesture to unlock audio; speak a short phrase
+          const t = 'Audio enabled';
+          const u = new SpeechSynthesisUtterance(t);
+          const v = window.speechSynthesis.getVoices();
+          if(v && v.length) u.voice = v.find(x=>x.lang.startsWith('en')) || v[0];
+          u.onend = ()=>{ console.debug('enableAudio utterance ended'); listVoices(); };
+          u.onerror = (e)=>{ console.warn('enableAudio error', e); listVoices(); };
+          window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+        }catch(e){ console.warn('enableAudio failed', e); alert('Enable audio failed: '+e); }
+      });
+      document.getElementById('manualSpeak').addEventListener('click', ()=>{
+        const text = document.getElementById('manualText').value;
+        if(!text) return;
+        const u = new SpeechSynthesisUtterance(text);
+        const v = window.speechSynthesis.getVoices();
+        if(v && v.length) u.voice = v.find(x=>x.lang.startsWith('en')) || v[0];
+        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+      });
+      document.getElementById('back').addEventListener('click', ()=>{ window.location.href = '/'; });
+
+      // populate on load
+      window.addEventListener('load', ()=>{ listVoices(); setTimeout(listVoices, 500); });
+      window.speechSynthesis.onvoiceschanged = ()=>{ listVoices(); };
+    </script>
+  </body>
+</html>

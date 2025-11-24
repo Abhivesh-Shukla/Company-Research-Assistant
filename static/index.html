@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Company Research Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="brand">
+          <div class="logo">CR</div>
+          <div>
+            <div class="title">Company Research Assistant</div>
+            <div class="subtitle">Interactive account plan generator — Research, refine, and export</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div class="small">Local demo — no external auth</div>
+          <button id="ttsToggle" class="btn secondary" title="Toggle voice replies">🔊</button>
+          <div id="speakingIndicator" class="speaking-indicator" style="display:none">
+            <div class="speaking-dot"></div>
+            <div class="small">Speaking...</div>
+          </div>
+          <a href="/static/diagnostics.html" class="small" style="color:var(--muted);text-decoration:none;">Diagnostics</a>
+        </div>
+      </div>
+
+      <div class="layout">
+        <div class="left">
+          <div class="panel">
+            <div class="controls">
+              <div style="flex:1">
+                <div class="input-wrap">
+                  <input id="input" placeholder="Type: Research Stripe" />
+                  <button id="send" class="btn">Search</button>
+                  <button id="mic" class="btn secondary" title="Toggle voice input">🎤</button>
+                </div>
+                <div class="small" style="margin-top:8px">Try: <code>Research Stripe</code> or <code>Show Plan</code></div>
+              </div>
+            </div>
+
+            <div style="margin-top:12px">
+              <div class="small">Session</div>
+              <div id="session" style="font-weight:600;word-break:break-all" class="small">(none)</div>
+            </div>
+
+            <div style="margin-top:12px">
+              <div class="small">Sources</div>
+              <div id="sources" class="sources">No sources yet</div>
+            </div>
+
+            <div style="margin-top:12px">
+              <div class="small">Conflicts</div>
+              <div id="conflicts" class="conflict">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="right">
+          <div class="panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-weight:700">Chat</div>
+              <div class="small">Agent replies and plan preview</div>
+            </div>
+
+            <div id="chat" class="chat-window" aria-live="polite"></div>
+
+            <div class="footer">Use <code>update section:&lt;SectionName&gt; &lt;content&gt;</code> to quickly apply edits from chat, or click Edit on a section below.</div>
+          </div>
+
+          <div style="height:16px"></div>
+
+              <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-weight:700">Account Plan</div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <div class="small">Editable sections — click Edit to modify</div>
+                    <button id="readAll" class="btn">Read All</button>
+                  </div>
+                </div>
+
+                <div id="plan"></div>
+              </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let session_id = null;
+      let currentPlan = null;
+      let ttsEnabled = true;
+      const chatEl = document.getElementById('chat');
+      const planEl = document.getElementById('plan');
+      const sessionEl = document.getElementById('session');
+      const sourcesEl = document.getElementById('sources');
+      const conflictsEl = document.getElementById('conflicts');
+
+      const ttsToggleBtn = document.getElementById('ttsToggle');
+      if(ttsToggleBtn){
+        ttsToggleBtn.addEventListener('click', ()=>{
+          ttsEnabled = !ttsEnabled;
+          ttsToggleBtn.textContent = ttsEnabled ? '🔊' : '🔈';
+          ttsToggleBtn.classList.toggle('secondary', !ttsEnabled);
+        });
+      }
+
+      function addChat(role, text, meta) {
+        const row = document.createElement('div'); row.className = 'msg-row '+(role==='user'?'user':'agent');
+        const bubble = document.createElement('div'); bubble.className = 'bubble '+(role==='user'?'user':'agent');
+        bubble.innerHTML = text.replace(/\n/g,'<br>');
+        row.appendChild(bubble);
+        chatEl.appendChild(row);
+        if(meta){
+          const m = document.createElement('div'); m.className='meta'; m.textContent = meta; chatEl.appendChild(m);
+        }
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      function renderPlan(plan){
+        currentPlan = plan;
+        planEl.innerHTML = '';
+        if(!plan) return planEl.innerHTML = '<div class="small">No plan yet — run a Research command.</div>';
+        Object.keys(plan).forEach(section=>{
+          const sec = document.createElement('div'); sec.className='plan-section';
+          const header = document.createElement('div'); header.className='plan-header';
+          const title = document.createElement('div'); title.className='plan-title'; title.textContent = section;
+          const actions = document.createElement('div'); actions.className='section-actions';
+          const editBtn = document.createElement('button'); editBtn.className='btn secondary'; editBtn.textContent='Edit';
+          const readBtn = document.createElement('button'); readBtn.className='btn'; readBtn.textContent='Read';
+          const copyBtn = document.createElement('button'); copyBtn.className='btn'; copyBtn.textContent='Use in Chat';
+          actions.appendChild(editBtn); actions.appendChild(readBtn); actions.appendChild(copyBtn);
+          header.appendChild(title); header.appendChild(actions);
+          sec.appendChild(header);
+
+          const content = document.createElement('div'); content.className='section-content'; content.innerText = plan[section] || '';
+          sec.appendChild(content);
+
+          // edit behaviour
+          editBtn.addEventListener('click', ()=>{
+            const ta = document.createElement('textarea'); ta.className='edit-area'; ta.value = plan[section];
+            const save = document.createElement('button'); save.className='btn'; save.textContent='Save';
+            const cancel = document.createElement('button'); cancel.className='btn secondary'; cancel.textContent='Cancel';
+            const btnWrap = document.createElement('div'); btnWrap.style.marginTop='8px'; btnWrap.className='flex'; btnWrap.appendChild(save); btnWrap.appendChild(cancel);
+            sec.replaceChild(ta, content);
+            sec.appendChild(btnWrap);
+
+            save.onclick = async ()=>{
+              const newContent = ta.value.trim();
+              // send update command to server
+              const msg = `update section:${section} ` + newContent.replace(/\n/g,' ');
+              await sendChatMessage(msg, {silent:true});
+              // update UI optimistically
+              plan[section] = newContent;
+              renderPlan(plan);
+            };
+            cancel.onclick = ()=>{ renderPlan(plan); };
+          });
+
+          readBtn.addEventListener('click', ()=>{
+            if(ttsEnabled) speak(plan[section] || `Section ${section} is empty.`);
+            else addChat('agent', 'TTS is disabled. Click the 🔊 button to enable voice replies.');
+          });
+
+          copyBtn.addEventListener('click', ()=>{
+            const cmd = `${section}: ` + (plan[section]||'');
+            document.getElementById('input').value = cmd;
+            document.getElementById('input').focus();
+          });
+
+          planEl.appendChild(sec);
+        });
+      }
+
+      document.getElementById('send').addEventListener('click', ()=>{ const v=document.getElementById('input').value.trim(); if(v) sendChatMessage(v); });
+      document.getElementById('input').addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ const v=document.getElementById('input').value.trim(); if(v) sendChatMessage(v); } });
+
+      async function sendChatMessage(text, opts={silent:false}){
+        document.getElementById('input').value='';
+        addChat('user', text);
+        const res = await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id, message:text})});
+        const j = await res.json();
+        session_id = j.session_id || session_id;
+        sessionEl.textContent = session_id || '(none)';
+        if(j.reply && !opts.silent) { addChat('agent', j.reply); if(ttsEnabled) speak(j.reply); }
+        if(j.follow_up && !opts.silent) { addChat('agent', j.follow_up); if(ttsEnabled) speak(j.follow_up); }
+        if(j.sources){ sourcesEl.textContent = j.sources.join(' | '); }
+        if(j.conflicts && j.conflicts.length){ conflictsEl.textContent = j.conflicts.join(' ; '); if(ttsEnabled) speak('I found potential conflicts: ' + j.conflicts.join('; ')); }
+        if(j.plan){ renderPlan(j.plan); }
+        return j;
+      }
+
+      // initial placeholder
+      renderPlan(null);
+      // --- Voice: SpeechRecognition (STT) and SpeechSynthesis (TTS)
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+      let recognition = null;
+      let listening = false;
+      const micBtn = document.getElementById('mic');
+      if(SpeechRecognition){
+        recognition = new SpeechRecognition();
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = ()=>{ listening = true; micBtn.textContent = '■'; micBtn.title='Stop listening'; micBtn.classList.remove('secondary'); };
+        recognition.onend = ()=>{ listening = false; micBtn.textContent = '🎤'; micBtn.title='Start voice input'; micBtn.classList.add('secondary'); };
+
+        recognition.onresult = (event)=>{
+          let interim = '';
+          let final = '';
+          for(let i=event.resultIndex; i<event.results.length; i++){
+            const r = event.results[i];
+            if(r.isFinal) final += r[0].transcript;
+            else interim += r[0].transcript;
+          }
+          const inputEl = document.getElementById('input');
+          inputEl.value = (final || interim).trim();
+          // auto-send when final recognized phrase appears
+          if(final && final.trim().length>1){
+            sendChatMessage(inputEl.value);
+            recognition.stop();
+          }
+        };
+      } else {
+        micBtn.disabled = true; micBtn.title = 'Voice not supported in this browser';
+      }
+
+      micBtn.addEventListener('click', ()=>{
+        if(!recognition) return;
+        if(!listening){
+          try{ recognition.start(); }catch(e){}
+        } else {
+          recognition.stop();
+        }
+      });
+
+      function speak(text){
+        // delegate to speakAsync but don't await; include console logs for debugging
+        if(!('speechSynthesis' in window)) { console.warn('TTS not supported in this browser'); return; }
+        if(!text) return;
+        speakAsync(text).catch(e=>console.warn('speakAsync failed', e));
+      }
+
+      // Ensure voices are loaded early — some browsers require a user gesture
+      try{
+        const voices = window.speechSynthesis.getVoices();
+        console.debug('Initial voices loaded:', voices && voices.length);
+      }catch(e){ console.debug('getVoices() failed', e); }
+      window.speechSynthesis.onvoiceschanged = ()=>{
+        try{
+          const v = window.speechSynthesis.getVoices();
+          console.debug('voiceschanged, voices available:', v && v.length);
+        }catch(e){ console.debug('voiceschanged handler error', e); }
+      };
+
+      function speakAsync(text){
+        return new Promise((resolve)=>{
+          if(!('speechSynthesis' in window) || !text || !ttsEnabled){ resolve(); return; }
+          try{
+            const ut = new SpeechSynthesisUtterance(text);
+            ut.lang = 'en-US';
+            ut.rate = 1.0;
+            ut.pitch = 1.0;
+            const voices = window.speechSynthesis.getVoices();
+            if(voices && voices.length) ut.voice = voices.find(v=>v.lang.startsWith('en')) || voices[0];
+            const indicator = document.getElementById('speakingIndicator');
+            try{ if(indicator) indicator.style.display = 'inline-flex'; }catch(e){}
+            ut.onend = ()=>{ try{ if(indicator) indicator.style.display='none'; }catch(e){}; resolve(); };
+            ut.onerror = ()=>{ try{ if(indicator) indicator.style.display='none'; }catch(e){}; resolve(); };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(ut);
+          }catch(e){ resolve(); }
+        });
+      }
+
+      // Read All handler: speak each section sequentially
+      const readAllBtn = document.getElementById('readAll');
+      if(readAllBtn){
+        readAllBtn.addEventListener('click', async ()=>{
+          if(!currentPlan){ addChat('agent', 'No plan to read. Run a Research command first.'); return; }
+          for(const sec of Object.keys(currentPlan)){
+            const text = `${sec}. ${currentPlan[sec] || 'No content.'}`;
+            await speakAsync(text);
+            await new Promise(r=>setTimeout(r, 300));
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
